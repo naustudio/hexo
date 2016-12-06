@@ -1,5 +1,6 @@
 'use strict';
 
+var moment = require('moment');
 var should = require('chai').should(); // eslint-disable-line
 
 describe('open_graph', function() {
@@ -8,35 +9,42 @@ describe('open_graph', function() {
   var openGraph = require('../../../lib/plugins/helper/open_graph');
   var isPost = require('../../../lib/plugins/helper/is').post;
   var tag = require('hexo-util').htmlTag;
+  var Post = hexo.model('Post');
 
   function meta(options) {
     return tag('meta', options);
   }
 
-  it('default', function() {
-    var result = openGraph.call({
-      page: {
-        tags: [
-          { name: 'optimize' },
-          { name: 'web' }
-        ]
-      },
-      config: hexo.config,
-      is_post: isPost
-    });
+  before(function() {
+    hexo.config.permalink = ':title';
+    return hexo.init();
+  });
 
-    result.should.eql([
-      meta({name: 'description'}),
-      meta({name: 'keywords', content: 'optimize,web'}),
-      meta({property: 'og:type', content: 'website'}),
-      meta({property: 'og:title', content: hexo.config.title}),
-      meta({property: 'og:url'}),
-      meta({property: 'og:site_name', content: hexo.config.title}),
-      meta({property: 'og:description'}),
-      meta({name: 'twitter:card', content: 'summary'}),
-      meta({name: 'twitter:title', content: hexo.config.title}),
-      meta({name: 'twitter:description'})
-    ].join('\n'));
+  it('default', function() {
+    Post.insert({
+        source: 'foo.md',
+        slug: 'bar'
+      }).then(function(post) {
+        return post.setTags(['optimize', 'web'])
+          .thenReturn(Post.findById(post._id));
+      }).then(function(post) {
+        openGraph.call({
+          page: post,
+          config: hexo.config,
+          is_post: isPost
+        }).should.eql([
+          meta({name: 'keywords', content: 'optimize,web'}),
+          meta({property: 'og:type', content: 'website'}),
+          meta({property: 'og:title', content: hexo.config.title}),
+          meta({property: 'og:url'}),
+          meta({property: 'og:site_name', content: hexo.config.title}),
+          meta({property: 'og:updated_time', content: post.updated.toISOString()}),
+          meta({name: 'twitter:card', content: 'summary'}),
+          meta({name: 'twitter:title', content: hexo.config.title})
+        ].join('\n'));
+
+        return Post.removeById(post._id);
+      });
   });
 
   it('title - page', function() {
@@ -371,4 +379,47 @@ describe('open_graph', function() {
 
     result.should.contain(meta({property: 'fb:app_id', content: '123456789'}));
   });
+
+  it('updated - options', function() {
+    var result = openGraph.call({
+      page: { updated: moment('2016-05-23T21:20:21.372Z') },
+      config: {},
+      is_post: isPost
+    }, { });
+
+    result.should.contain(meta({property: 'og:updated_time', content: '2016-05-23T21:20:21.372Z'}));
+  });
+
+  it('updated - options - allow overriding og:updated_time', function() {
+    var result = openGraph.call({
+      page: { updated: moment('2016-05-23T21:20:21.372Z') },
+      config: {},
+      is_post: isPost
+    }, { updated: moment('2015-04-22T20:19:20.371Z') });
+
+    result.should.contain(meta({property: 'og:updated_time', content: '2015-04-22T20:19:20.371Z'}));
+  });
+
+  it('updated - options - allow disabling og:updated_time', function() {
+    var result = openGraph.call({
+      page: { updated: moment('2016-05-23T21:20:21.372Z') },
+      config: {},
+      is_post: isPost
+    }, { updated: false });
+
+    result.should.not.contain(meta({property: 'og:updated_time', content: '2016-05-23T21:20:21.372Z'}));
+  });
+
+  it('description - do not add /(?:og:|twitter:)?description/ meta tags if there is no description', function() {
+    var result = openGraph.call({
+      page: { },
+      config: {},
+      is_post: isPost
+    }, { });
+
+    result.should.not.contain(meta({property: 'og:description'}));
+    result.should.not.contain(meta({property: 'twitter:description'}));
+    result.should.not.contain(meta({property: 'description'}));
+  });
+
 });
